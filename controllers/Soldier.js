@@ -41,11 +41,26 @@ class Soldier {
         
     }
     update(player, soldiers, towers) {
-        let target = null;
         if (!Array.isArray(soldiers)) {
             console.error('Invalid soldiers argument passed to update. Expected an array.');
             return;
         }
+    
+        this.applySeparationForce(soldiers);
+    
+        let target = this.findTarget(player, soldiers);
+        if (target) {
+            this.interactWithTarget(target);
+        } else {
+            this.moveTowardsNearestEnemyTower(towers);
+        }
+    
+        if (this.cooldownCounter > 0) {
+            this.cooldownCounter--;
+        }
+    }
+    
+    applySeparationForce(soldiers) {
         const separationForce = new THREE.Vector3();
         for (const otherSoldier of soldiers) {
             if (otherSoldier !== this && otherSoldier.isAlive() && this.position.distanceTo(otherSoldier.position) < 1) {
@@ -54,28 +69,11 @@ class Soldier {
             }
         }
         this.position.add(separationForce);
-        // Encontra a torre inimiga mais próxima
-        let targetTower = null;
-        for (const tower of towers) {
-            if (tower.getTeam() !== this.getTeam()) {
-                if (!targetTower || this.position.distanceTo(tower.getPosition()) < this.position.distanceTo(targetTower.getPosition())) {
-                    targetTower = tower.getPosition();
-                }
-            }
-        }
-        
-        // Move em direção à torre inimiga mais próxima, se houver uma
-        if (targetTower) {
-            const direction = new THREE.Vector3().subVectors(targetTower, this.position).normalize().multiplyScalar(this.moveSpeed);
-            const newPosition = new THREE.Vector3().addVectors(this.position, direction);
-            this.move(newPosition);
-        } 
-        if (target && target.position && this.position && this.position.distanceTo(target.position) > this.attackRadius) {
-            const direction = new THREE.Vector3().subVectors(target.position, this.position).normalize().multiplyScalar(this.moveSpeed);
-            const newPosition = new THREE.Vector3().addVectors(this.position, direction);
-            this.move(newPosition);
-        }
-        
+    }
+    
+    findTarget(player, soldiers) {
+        let target = null;
+    
         // Find the closest soldier or player within follow radius
         for (const soldier of soldiers) {
             if (this.position && soldier.position) {
@@ -84,14 +82,11 @@ class Soldier {
                     if (soldier !== this && soldier.isAlive() && (!target || distance < this.position.distanceTo(target.position))) {
                         target = soldier;
                         break;
+                    }
                 }
-
             }
-
         }
-   
-        }
-      
+    
         // If no soldier found, check if player is within follow radius
         if (!target && this.position && player.position) {
             const distanceToPlayer = this.position.distanceTo(player.position);
@@ -99,35 +94,40 @@ class Soldier {
                 target = player;
             }
         }
-      
-        // Move towards the target if not within attack radius
-        if (target && target.position && this.position && this.position.distanceTo(target.position) > this.attackRadius) {
-            const direction = new THREE.Vector3().subVectors(target.position, this.position).normalize().multiplyScalar(this.moveSpeed);
-            const newPosition = new THREE.Vector3().addVectors(this.position, direction);
-            this.move(newPosition);
-        }
-      
-        // Attack the target if within attack radius
-        if (target && target.position && this.position && this.position.distanceTo(target.position) <= this.attackRadius && this.cooldownCounter === 0) {
-            console.log('Attacking target:', target);
+    
+        return target;
+    }
+    
+    interactWithTarget(target) {
+        if (this.position.distanceTo(target.position) > this.attackRadius) {
+            this.moveTowardsTarget(target);
+        } else if (this.cooldownCounter === 0) {
             this.attack(target);
             this.cooldownCounter = this.cooldown;
         }
-    
-        for (const soldier of soldiers) {
-            if (soldier !== this && soldier.isAlive() && soldier.getTeam() !== this.getTeam() && this.position.distanceTo(soldier.position) <= this.attackRadius && this.cooldownCounter === 0) {
-                this.attack(soldier);
-                this.cooldownCounter = this.cooldown;
-            }
-        }
-        
-        
-    
-        if (this.cooldownCounter > 0) {
-            this.cooldownCounter--;
-        }
     }
     
+    moveTowardsTarget(target) {
+        const direction = new THREE.Vector3().subVectors(target.position, this.position).normalize().multiplyScalar(this.moveSpeed);
+        const newPosition = new THREE.Vector3().addVectors(this.position, direction);
+        this.move(newPosition);
+    }
+    
+    moveTowardsNearestEnemyTower(towers) {
+        let targetTower = null;
+        for (const tower of towers) {
+            if (tower.getTeam() !== this.getTeam()) {
+                if (!targetTower || this.position.distanceTo(tower.getPosition()) < this.position.distanceTo(targetTower.getPosition())) {
+                    targetTower = tower;
+                }
+            }
+        }
+    
+        // Move towards the nearest enemy tower, if there is one
+        if (targetTower) {
+            this.moveTowardsTarget({ position: targetTower.getPosition() });
+        }
+    }
     createMesh() {
         const geometry = new THREE.BoxGeometry(1, 2, 1);
         const material = new THREE.MeshBasicMaterial({ color: this.team });
