@@ -1,17 +1,17 @@
 import * as THREE from 'three';
-
 class CameraController {
-    constructor(camera, player, offset) {
+    constructor(camera, player) {
         this.camera = camera;
         this.player = player;
-        this.offset = offset;
+        this.offset = new THREE.Vector3(0, -10,10);
+
     }
 
     update() {
-        this.camera.position.x = this.player.cube.position.x + this.offset.x;
-        this.camera.position.y = this.player.cube.position.y + this.offset.y;
-        this.camera.position.z = this.player.cube.position.z + this.offset.z;
-        this.camera.lookAt(this.player.cube.position);
+        this.camera.position.x = this.player.getPosition().x + this.offset.x;
+        this.camera.position.y = this.player.getPosition().y + this.offset.y;
+        this.camera.position.z = this.player.getPosition().z + this.offset.z + 20;
+        this.camera.lookAt(this.player.getPosition());
     }
 }
 

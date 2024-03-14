@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { Projectile } from './../controllers/projectileController';
+import { HealthBarManager } from './healthBarManager';
+import ModelController from './modelController';
 
 class Tower {
-    constructor(scene, position, attackRadius = 20, cooldown = 100, healthPoints = 100, damage = 10,camera,team) {
-
+    constructor(scene, position, attackRadius = 20, cooldown = 100, healthPoints = 100, damage = 10, camera, team) {
         this.scene = scene;
         this.position = position;
         this.attackRadius = attackRadius;
@@ -13,86 +14,81 @@ class Tower {
         this.damage = damage;
         this.projectiles = [];
         this.camera = camera;
-        this.healthBar = document.getElementById('player-health-bar-fill');
-        this.healthText = document.getElementById('player-health-text');
         this.team = team;
+        this.createTowerMesh();
+        this.healthBarManager = new HealthBarManager(this, camera, scene);
+        // Circulo de ataque
+        const geometry = new THREE.CircleGeometry(this.attackRadius, 32);
+        const material = new THREE.LineBasicMaterial({ color: this.team });
+        this.attackRadiusIndicator = new THREE.LineLoop(geometry, material);
+        this.attackRadiusIndicator.position.copy(position);
+        this.scene.add(this.attackRadiusIndicator);
+        this.model = null;
+        this.modelController = new ModelController(this.scene);
+        this.modelController.createTower(this.position, this.team, model => {
+            this.model = model;
+        });
 
-        const geometry = new THREE.ConeGeometry(1, 10, 32);
+    }
+
+    createTowerMesh() {
+        const geometry = new THREE.CylinderGeometry(1,1,1);
         const material = new THREE.MeshBasicMaterial({ color: this.team });
         this.mesh = new THREE.Mesh(geometry, material);
-        this.mesh.position.set(position.x, position.y, position.z+4);
+        this.mesh.position.set(this.position.x, this.position.y, this.position.z + 1);
         this.mesh.rotation.x = Math.PI / 2; // Rotate the cone to be parallel to the ground
-        scene.add(this.mesh);
+        this.scene.add(this.mesh);
 
-
-        // Create a circle to indicate the attack radius
-        const circleGeometry = new THREE.CircleGeometry(this.attackRadius, 32);
-        const circleMaterial = new THREE.MeshBasicMaterial({ color: 'green', side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
-        this.attackRadiusIndicator = new THREE.Mesh(circleGeometry, circleMaterial);
-        this.attackRadiusIndicator.position.copy(position);
-        this.attackRadiusIndicator.rotation.x = Math.PI / 1; // Rotate the circle to be parallel to the ground
-        scene.add(this.attackRadiusIndicator);
-
-        // Crie um novo elemento div para o texto do HP
-        this.healthText = document.createElement('div');
-        this.healthText.style.position = 'absolute';
-        this.healthText.style.color = 'white';
-        this.healthText.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        this.healthText.style.padding = '5px';
-        this.healthText.style.borderRadius = '5px';
-        document.body.appendChild(this.healthText); 
-        
     }
 
-    shoot(target) {
-        const projectile = new Projectile(this.scene, this.position, target, 0.1);
+    shoot(target, damage) {
+        if (!target.isAlive()) {
+            return;
+        }
+        if (target.getTeam() === this.team) {
+            return;
+        }
+        const projectile = new Projectile(this.scene, this.position, target, 0.2, this.team,damage);
         this.projectiles.push(projectile);
     }
-
-    update(enemy) {
-        const distance = this.position.distanceTo(enemy.cube.position);
-        if (distance <= this.attackRadius && this.cooldownCounter === 0) {
-            this.shoot(enemy.cube.position);
-            this.cooldownCounter = this.cooldown;
-        }
-
+    
+    update(player, soldiers, towers) {
         if (this.cooldownCounter > 0) {
             this.cooldownCounter--;
         }
-
-        // Update the projectiles and remove any that have hit the target
-        this.projectiles = this.projectiles.filter(projectile => !projectile.update(enemy));
-
-        // Update the health bar
-        this.healthBar.style.width = `${this.healthPoints}%`;
-        this.healthText.textContent = `Health: ${this.healthPoints}`;
+    
+        let aliveSoldiers = soldiers.filter(soldier => soldier.isAlive());
+        let alivePlayer = player.isAlive();
         
-        this.updateHPText();
-
+        // Priorizar o jogador como alvo se estiver dentro do alcance
+        if (alivePlayer && this.position.distanceTo(player.mesh.position) <= this.attackRadius && this.cooldownCounter === 0) {
+            this.shoot(player, this.damage);
+            this.cooldownCounter = this.cooldown;
+            return; // Interrompe a execução para que a torre ataque apenas o jogador neste ciclo
+        }
+        
+        // Se o jogador não for atacado, então atacar os soldados
+        aliveSoldiers.forEach(soldier => {
+            const distanceToSoldier = this.position.distanceTo(soldier.mesh.position);
+            if (distanceToSoldier <= this.attackRadius && this.cooldownCounter === 0) {
+                this.shoot(soldier, this.damage);
+                this.cooldownCounter = this.cooldown;
+            }
+        });
+    
+        this.projectiles = this.projectiles.filter(projectile => !projectile.update(player, aliveSoldiers, towers));
+        this.healthBarManager.update();
     }
 
-    updateHPText() {
-        // Atualize a matriz do mundo da câmera
-        this.camera.updateMatrixWorld();
-        const vector = new THREE.Vector3();
-        vector.setFromMatrixPosition(this.mesh.matrixWorld);
-        vector.project(this.camera);
-    
-        // Converta as coordenadas normalizadas (-1 a 1) para coordenadas de pixel
-        const left = (vector.x * 0.5 + 0.5) * window.innerWidth;
-        const top = (vector.y * -0.5 + 0.5) * window.innerHeight;
-    
-        // Atualize a posição do texto do HP
-        this.healthText.style.left = `${left}px`;
-        this.healthText.style.top = `${top}px`; // Ajuste o deslocamento conforme necessário
-    }
 
     takeDamage(damage) {
         this.healthPoints -= damage;
         if (this.healthPoints <= 0) {
-            this.scene.remove(this.mesh);
-            this.scene.remove(this.attackRadiusIndicator);
-            this.healthText.remove();
+            this.healthPoints = 0;
+            this.die();
+        }
+        if (this.healthBarManager) {
+            this.healthBarManager.update();
         }
     }
 
@@ -101,7 +97,7 @@ class Tower {
     }
 
     getPosition() {
-        return this.position;
+        return this.mesh.position.clone();
     }
 
     getTeam() {
@@ -123,8 +119,16 @@ class Tower {
         this.scene.remove(this.attackRadiusIndicator);
         this.healthText.remove();
     }
-    
 
+    isClicked(worldPosition) {
+        return this.mesh.geometry.boundingBox.containsPoint(worldPosition);
+    }
+    setTarget(player, soldiers) {
+        let targets = [player, ...soldiers].filter(target => target.isAlive() && this.position.distanceTo(target.mesh.position) <= this.attackRadius);
+        targets.sort((a, b) => this.position.distanceTo(a.mesh.position) - this.position.distanceTo(b.mesh.position));
+        this.target = targets[0];
+    }
+    
 }
 
 export { Tower };

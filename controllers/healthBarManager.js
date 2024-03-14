@@ -1,56 +1,47 @@
 import * as THREE from 'three';
-import { Vector3 } from 'three';
-class HealthBarManager {
-    constructor(player, camera, renderer) {
-        this.player = player;
+
+export class HealthBarManager {
+    constructor(object, camera, renderer) {
+        this.object = object;
         this.camera = camera;
         this.renderer = renderer;
-        this.healthBar = document.getElementById('player-health-bar-fill');
-        this.healthBarText = document.getElementById('player-health-text');
+
+        this.canvas = document.createElement('canvas');
+        this.context = this.canvas.getContext('2d');
+
+        this.texture = new THREE.CanvasTexture(this.canvas);
+
+        this.material = new THREE.SpriteMaterial({ map: this.texture });
+
+        this.sprite = new THREE.Sprite(this.material);
+        this.object.mesh.add(this.sprite);
+        // normalize the sprite size
+        this.sprite.scale.set(2,1,1);
     }
 
     update() {
-        // Update health bar width
-        this.healthBar.style.width = `${(this.player.healthPoints / 100) * 100}%`;
-    
-        // Convert the player's position from world coordinates to screen coordinates
-        const vector = new THREE.Vector3();
-        vector.setFromMatrixPosition(this.player.cube.matrixWorld);
-        vector.project(this.camera);
-    
-        // Convert from normalized device coordinates (-1 to +1) to pixel coordinates
-        const widthHalf = 0.5 * this.renderer.domElement.clientWidth;
-        const heightHalf = 0.5 * this.renderer.domElement.clientHeight;
-    
-        vector.x = (vector.x * widthHalf) + widthHalf;
-        vector.y = -(vector.y * heightHalf) + heightHalf;
-    
-        // Update health bar text
-        this.healthBarText.textContent = `${this.player.healthPoints} HP`;
+        const healthPercent = this.object.healthPoints / 100;
+        this.drawHealthBar(healthPercent);
+        this.texture.needsUpdate = true;
+        this.sprite.position.set(0, this.object.mesh.position.z,0);
+        this.sprite.quaternion.copy(this.camera.quaternion);
+    }
 
-        if (this.player.healthPoints <= 0) {
-            this.healthBar.style.display = 'none';
-            this.healthBarText.style.display = 'none';
-        } else {
-            this.healthBar.style.display = 'block';
-            this.healthBarText.style.display = 'block';
-        }
+    drawHealthBar(healthPercent) {
+        // Clear the canvas
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Update health bar position
-        this.healthBar.style.top = `${vector.y}px`;
-        this.healthBar.style.left = `${vector.x}px`;
-        this.healthBarText.style.top = `${vector.y}px`;
-        this.healthBarText.style.left = `${vector.x }px`;
-
-        // Update health bar color
-
-        if (this.player.healthPoints > 70) {
-            this.healthBar.style.backgroundColor = 'green';
-        } else if (this.player.healthPoints > 30) {
-            this.healthBar.style.backgroundColor = 'yellow';
-        } else {
-            this.healthBar.style.backgroundColor = 'red';
-        }
+        // Draw the health bar background
+        this.context.fillStyle = 'gray';
+        this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        const color = healthPercent > 0.7 ? 'green' : healthPercent > 0.3 ? 'yellow' : 'red';
+        this.context.fillStyle = color;
+        this.context.fillRect(0, 0, healthPercent * this.canvas.width, this.canvas.height);
+        this.context.font = 'Bold 100px Arial';
+        this.context.fillStyle = 'white';
+        this.context.textAlign = 'center';
+        this.context.textBaseline = 'middle';
+        this.context.fillText(`${this.object.healthPoints}`, this.canvas.width / 2, this.canvas.height / 2);
     }
 }
 

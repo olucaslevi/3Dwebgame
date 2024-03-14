@@ -1,69 +1,91 @@
-import * as THREE from 'three';
 
 class InputManager {
-  constructor(camera,terrain,player,soldiers) {
+    constructor(raycaster,camera, terrain, player, soldiers, towers) {
       this.mouse = {
-          x: 0,
-          y: 0,
-          clicked: false
+        x: 0,
+        y: 0,
+        clicked: false
       };
+      this.raycaster = raycaster;
       this.camera = camera;
       this.player = player;
-      this.towers = [];
+      this.towers = towers;
       this.terrain = terrain;
       this.soldiers = soldiers;
-      this.raycaster = new THREE.Raycaster(); 
-      window.addEventListener('mousemove', (event) => this.onMouseMove(event));
-      window.addEventListener('mousedown', (event) => this.onMouseDown(event));
-      window.addEventListener('mouseup', () => this.onMouseUp());
-  }
-
-  onMouseMove(event) {
+      window.addEventListener('mousemove', this.onMouseMove.bind(this));
+      window.addEventListener('mousedown', this.onMouseDown.bind(this));
+      window.addEventListener('mouseup', this.onMouseUp.bind(this));
+    }
+  
+    onMouseMove(event) {
       this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-  }
-
   
-  onMouseDown(event) {
-    this.mouse.clicked = true;
-
-    // Normaliza as coordenadas do mouse
-    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-    // Cria um Raycaster
-    const raycaster = new THREE.Raycaster();
-
-    // Define o raio a partir da posição da câmera e direciona para as coordenadas do mouse
-    raycaster.setFromCamera(this.mouse, this.camera);
-
-    // Certifique-se de que o terreno está definido
-    if (this.terrain) {
-        // Obtem a lista de todos os objetos que o raio intersecta
-        const intersects = raycaster.intersectObjects([this.terrain]);
-
-        // Se o raio intersecta o terreno
-
-        if (intersects.length > 0) {
-            this.mouse.worldPosition = intersects[0].point;
-    
-            // Verifica se o usuário clicou perto de uma torre
-            
-    
-            // Se o usuário não clicou em uma torre, move o jogador
-            this.player.moveTo(this.mouse.worldPosition);
-        }
-
+      if (this.mouse.clicked) {
+        this.updatePlayerPosition();
+      }
     }
-}
-
-  onMouseUp() {
+  
+    onMouseDown(event) {
+      this.mouse.clicked = true;
+      this.updatePlayerPosition();
+    }
+  
+    onMouseUp() {
       this.mouse.clicked = false;
+    }
+    updatePlayerPosition() {
+      this.raycaster.setFromCamera(this.mouse, this.camera);
+      const intersects = this.raycaster.intersectObjects([this.terrain]);
+  
+      if (intersects.length > 0) {
+          const targetPosition = intersects[0].point;
+          this.player.moveTo(targetPosition);
+  
+          // Se o jogador está atacando, pare o ataque quando o terreno é clicado
+          if (this.player.getTarget()) {
+              this.player.setTarget(null);
+              console.log('Stopped attacking');
+          } else {
+              this.checkTarget();
+          }
+      }
   }
-
-  getMouse() {
+  
+    checkTarget() {
+      if (!this.player.getTarget()) {
+        const { soldiers, towers } = this;
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+ 
+        let target = null;
+        let intersects = [];
+  
+        if (soldiers) {
+          intersects = this.raycaster.intersectObjects(soldiers.map(soldier => soldier.mesh));
+          if (intersects.length > 0) {
+            target = soldiers.find(soldier => soldier.mesh === intersects[0].object);
+            this.player.setTarget(target);
+            console.log('Targeting soldier');
+            return;
+          }
+        }
+  
+        if (towers) {
+          intersects = this.raycaster.intersectObjects(towers.map(tower => tower.mesh));
+          if (intersects.length > 0) {
+            target = towers.find(tower => tower.mesh === intersects[0].object);
+            this.player.setTarget(target);
+            console.log('Targeting tower');
+            return;
+          }
+        }
+      }
+    }
+  
+    getMouse() {
       return this.mouse;
+    }
   }
-}
-
-export default InputManager;
+  
+  export default InputManager;
+  

@@ -1,7 +1,10 @@
 import * as THREE from 'three';
+import { HealthBarManager } from './healthBarManager';
+import ModelController from './modelController';
 
 class Soldier {
-    constructor(scene, position,target, attackRadius = 0.4,followRadius = 12, moveSpeed = 0.1, cooldown = 100, healthPoints = 100, damage = 10, team='blue') {
+    constructor(scene, position,target, attackRadius = 0.4,followRadius = 6, moveSpeed = 0.1, cooldown = 100, healthPoints = 100, damage = 10, team='blue') {
+        
         this.scene = scene;
         this.position = position;
         this.target = target;
@@ -16,43 +19,31 @@ class Soldier {
         this.damage = damage;
         this.followRadius = followRadius;
         this.moveSpeed = moveSpeed;
-
-        // Adicione um pequeno valor aleatório à posição
-        this.position.x += Math.random() * 4 - 1;
-        this.position.y += Math.random() * 4 - 1;
-
-        // apenas pinta um círculo ao redor do soldado attackRadius
-        const circleGeometry = new THREE.CircleGeometry(this.attackRadius, 32);
-        const circleMaterial = new THREE.MeshBasicMaterial({ color: 'green', side: THREE.DoubleSide, transparent: true, opacity: 0.2 });
-        this.attackRadiusIndicator = new THREE.Mesh(circleGeometry, circleMaterial);
-        this.attackRadiusIndicator.position.copy(position);
-        this.attackRadiusIndicator.rotation.x = Math.PI / 1; // Rotate the circle to be parallel to the ground
-        scene.add(this.attackRadiusIndicator);
-
-        // apenas pinta um círculo ao redor do soldado followRadius
-        this.followRadius = followRadius;
-        this.outOfRangeCounter = 0;
-        const followCircleGeometry = new THREE.CircleGeometry(this.followRadius, 32);
-        const followCircleMaterial = new THREE.MeshBasicMaterial({ color: 'yellow', side: THREE.DoubleSide, transparent: true, opacity: 0.3 });
-        this.followRadiusIndicator = new THREE.Mesh(followCircleGeometry, followCircleMaterial);
-        this.followRadiusIndicator.position.copy(position);
-        this.followRadiusIndicator.rotation.x = Math.PI / 1; // Rotate the circle to be parallel to the ground
-        scene.add(this.followRadiusIndicator);
-        
+        this.healthBarManager = new HealthBarManager(this, this.scene, this.scene);
+        this.model = null;
+        this.modelController = new ModelController(this.scene);
+        this.modelController.createSoldier(this.position, this.team, model => {
+            this.model = model;
+        });
     }
-    update(player, soldiers, towers) {
-        if (!Array.isArray(soldiers)) {
-            console.error('Invalid soldiers argument passed to update. Expected an array.');
-            return;
-        }
-    
+    update(players, soldiers, towers) {
+        this.healthBarManager.update();
         this.applySeparationForce(soldiers);
-    
-        let target = this.findTarget(player, soldiers);
-        if (target) {
-            this.interactWithTarget(target);
+        this.updateModelPosition(); 
+        // Verifique se há um jogador dentro do raio de followRadius
+        let playerInRadius = this.findPlayerInRadius(players);
+        if (playerInRadius) {
+            this.target = playerInRadius;
+            this.interactWithTarget(playerInRadius);
         } else {
-            this.moveTowardsNearestEnemyTower(towers);
+            // Procurar outros alvos se nenhum jogador estiver dentro do raio
+            let target = this.findTarget(players, soldiers, towers);
+            if (target && target.isAlive() && target.getTeam() !== this.getTeam()) {
+                this.target = target;
+                this.interactWithTarget(target);
+            } else {
+                this.moveTowardsNearestEnemyTower(towers);
+            }
         }
     
         if (this.cooldownCounter > 0) {
@@ -65,6 +56,7 @@ class Soldier {
         for (const otherSoldier of soldiers) {
             if (otherSoldier !== this && otherSoldier.isAlive() && this.position.distanceTo(otherSoldier.position) < 1) {
                 const force = new THREE.Vector3().subVectors(this.position, otherSoldier.position).normalize().multiplyScalar(0.05);
+                force.z = 0; // Set the Z component of the force to 0
                 separationForce.add(force);
             }
         }
@@ -74,7 +66,7 @@ class Soldier {
     findTarget(player, soldiers) {
         let target = null;
     
-        // Find the closest soldier or player within follow radius
+        // Acha o soldado mais próximo dentro do raio de followRadius
         for (const soldier of soldiers) {
             if (this.position && soldier.position) {
                 const distance = this.position.distanceTo(soldier.position);
@@ -87,50 +79,67 @@ class Soldier {
             }
         }
     
-        // If no soldier found, check if player is within follow radius
+        // Se não houver soldados dentro do raio de followRadius, siga o jogador
         if (!target && this.position && player.position) {
             const distanceToPlayer = this.position.distanceTo(player.position);
             if (distanceToPlayer <= this.followRadius) {
                 target = player;
+                this.model.lookAt(0, target.getPosition().y, 0);
+
             }
         }
     
         return target;
     }
-    
+
+    unsetTarget() {
+        this.target = null;
+    }
     interactWithTarget(target) {
-        if (this.position.distanceTo(target.position) > this.attackRadius) {
+        if (this.position.distanceTo(target.getPosition()) > this.attackRadius) {
             this.moveTowardsTarget(target);
         } else if (this.cooldownCounter === 0) {
             this.attack(target);
             this.cooldownCounter = this.cooldown;
         }
     }
-    
-    moveTowardsTarget(target) {
-        const direction = new THREE.Vector3().subVectors(target.position, this.position).normalize().multiplyScalar(this.moveSpeed);
-        const newPosition = new THREE.Vector3().addVectors(this.position, direction);
-        this.move(newPosition);
+
+    findPlayerInRadius(players) {
+        for (let player of players) {
+            if (player.getTeam() !== this.getTeam() && this.position.distanceTo(player.getPosition()) <= this.followRadius) {
+                return player;
+            }
+        }
+        return null;
     }
     
+    moveTowardsTarget(target) {
+        const direction = new THREE.Vector3().subVectors(target.getPosition(), this.position).normalize();
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+        this.mesh.quaternion.copy(quaternion);
+        this.position.add(direction.multiplyScalar(this.moveSpeed));
+        this.mesh.position.copy(this.position);
+    }
+    
+    
+    
     moveTowardsNearestEnemyTower(towers) {
-        let targetTower = null;
+        let nearestTower = null;
         for (const tower of towers) {
             if (tower.getTeam() !== this.getTeam()) {
-                if (!targetTower || this.position.distanceTo(tower.getPosition()) < this.position.distanceTo(targetTower.getPosition())) {
-                    targetTower = tower;
+                if (!nearestTower || this.position.distanceTo(tower.getPosition()) < this.position.distanceTo(nearestTower.getPosition())) {
+                    nearestTower = tower;
                 }
             }
         }
-    
-        // Move towards the nearest enemy tower, if there is one
-        if (targetTower) {
-            this.moveTowardsTarget({ position: targetTower.getPosition() });
+        if (nearestTower) {
+            this.moveTowardsTarget(nearestTower);
         }
     }
     createMesh() {
-        const geometry = new THREE.BoxGeometry(1, 2, 1);
-        const material = new THREE.MeshBasicMaterial({ color: this.team });
+        new THREE.BoxGeometry(3, 1, 1);
+        const geometry = new THREE.BoxGeometry(3, 1, 1);
+        const material = new THREE.MeshBasicMaterial({ color: this.team,opacity: 0.5, transparent: true});
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.copy(this.position);
         return mesh;
@@ -138,52 +147,58 @@ class Soldier {
 
     takeDamage(amount) {
         this.healthPoints -= amount;
-        console.log(`Soldier ${this.team} took ${amount} damage. Remaining health: ${this.healthPoints}`);
+        this.healthBarManager.update();
         if (this.healthPoints <= 0) {
             this.die();
         }
     }
-    
-
     die() {
         this.scene.remove(this.mesh);
-        this.scene.remove(this.attackRadiusIndicator);
-        this.scene.remove(this.followRadiusIndicator);
-
-        // Remove the health text from the DOM
-        
+        if (this.model) {
+            this.modelController.removeModel(this.model);
+        }
     }
-
     isAlive() {
         this.outOfRangeCounter++;
         return this.healthPoints > 0;
-
     }
-
     getPosition() {
-        return this.position;
+        return this.mesh.position;
     }
-
     setPosition(position) {
         this.position = position;
-        this.mesh.position.copy(position);
     }
-
     attack(target) {
-        target.takeDamage(10);
+        if (!this.isAlive()) {
+            return;
+        }
+        if (target.isAlive() && target.getTeam() !== this.team) {
+            target.takeDamage(this.damage);
+        }
     }
-
     getTeam() {
         return this.team;
     }
-
-    move(position) {
+    moveTo(position) {
         this.position = position;
         this.mesh.position.copy(position);
         this.followRadiusIndicator.position.copy(position);
         this.attackRadiusIndicator.position.copy(position);
     }
-
+    isClicked(worldPosition) {
+        return this.mesh.geometry.boundingBox.containsPoint(worldPosition);
+    }
+    updateModelPosition() {
+        if (this.model && this.model.position && this.mesh) {
+            // Copia a posição do mesh para o modelo
+            this.model.position.copy(this.mesh.position);
+            this.model.rotation.copy(this.mesh.rotation);
+            //nao rotacionar no eixo y
+            this.model.rotation.y = 0;
+        }
+    }
+    
+    
 }
 
 export default Soldier;
